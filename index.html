@@ -366,6 +366,14 @@ h3.sec{font-size:1.02rem;font-weight:800;letter-spacing:-.02em}
   .boss{grid-template-columns:76px minmax(0,1fr)}
   .seg.mas img{height:42px} .parade{height:48px}
 }
+
+/* 저장 도우미 */
+.cert-img{-webkit-touch-callout:default;-webkit-user-select:auto;user-select:auto;-webkit-user-drag:auto}
+.saver .card{max-width:760px;margin:12px auto;gap:16px}
+.inapp{border:1px solid color-mix(in srgb,var(--amber) 45%,transparent);background:var(--amber-s);border-radius:16px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;color:var(--ink);font-size:.94rem}
+.inapp>b{color:var(--amber);font-weight:850}
+.saver{z-index:65}
+@media (max-width:360px){ .top-in{padding:0 12px;gap:8px} .brand{gap:8px} .brand .logo{width:32px;height:32px} .brand b{font-size:.96rem} .pill{padding:5px 9px;font-size:.78rem} .top .right{gap:6px} }
 </style>
 
 <header class="top">
@@ -733,6 +741,7 @@ function viewGate(){
       h("h1",null,"면접 ",h("em",null,"가는 길")),
       h("p",{class:"lede"},"옷장 앞에서 면접실 문을 나설 때까지, 여덟 정거장을 통과하고 인증서를 받으세요."),
       h("div",{class:"parade","aria-hidden":"true"},MASCOTS.map((m,i)=>pic("mas"+i,"")))),
+    inAppNotice("인증서 파일"),
     form,
     h("ul",{class:"rules"},
       h("li",null,h("b",null,"멘탈 ",h("span",{class:"heart"},"♥♥♥")),"틀리면 한 칸씩 줄고, 다 잃으면 그 정거장을 다시 합니다."),
@@ -1130,19 +1139,64 @@ async function drawCert(){
   x.textAlign="right"; x.fillText(`${d.getHours()}시 ${String(d.getMinutes()).padStart(2,"0")}분 발급`,W-110,H-84);
   return c;
 }
-const dlReady=(window.claude&&window.claude.use)?window.claude.use("downloads").catch(()=>null):Promise.resolve(null);
+/* ───── 저장: 기기마다 되는 방법이 달라 차례로 시도한다 ─────
+   ① Claude 화면이면 내려받기 기능  ② 아이폰·아이패드는 공유 창(‘이미지 저장’을 누르면 사진첩으로)
+   ③ 일반 브라우저는 파일 내려받기  ④ 카카오톡 같은 앱 안 화면, 파일로 연 안드로이드는 내려받기가 막혀 있어 직접 저장 안내 */
+const UA=navigator.userAgent||"";
+const IS_IOS=/iPhone|iPad|iPod/i.test(UA)||(/Macintosh/.test(UA)&&navigator.maxTouchPoints>1);
+const IS_ANDROID=/Android/i.test(UA);
+const IN_APP=/KAKAOTALK|NAVER\(inapp|DaumApps|Instagram|FBAN|FBAV|FB_IAB|Line\/|BAND\/|everytimeApp|; wv\)/i.test(UA);
+const HOSTED=/^https?:$/.test(location.protocol);
+const IN_CLAUDE=!!(window.claude&&window.claude.use);
+const RISKY=!IN_CLAUDE&&(IN_APP||(IS_ANDROID&&!HOSTED));
+const dlReady=IN_CLAUDE?window.claude.use("downloads").catch(()=>null):Promise.resolve(null);
+function asShareFile(blob,filename){ try{ const f=new File([blob],filename,{type:blob.type||"application/octet-stream"}); if(navigator.share&&navigator.canShare&&navigator.canShare({files:[f]})) return f; }catch(e){} return null; }
+async function shareBlob(blob,filename){ const f=asShareFile(blob,filename); if(!f) return null; try{ await navigator.share({files:[f]}); return "shared"; }catch(e){ return e&&e.name==="AbortError"?"declined":null; } }
+function anchorSave(blob,filename){ try{ const url=URL.createObjectURL(blob), a=h("a",{href:url,download:filename}); document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),4000); return "started"; }catch(e){ return "manual"; } }
 async function saveBlob(blob, filename){
   let dl=null; try{ dl=await Promise.race([dlReady,new Promise(r=>setTimeout(()=>r(null),1500))]); }catch(e){}
-  if(dl){ try{ await dl.save({filename,data:blob}); return "saved"; }catch(e){ return (e&&e.code)==="declined"?"declined":"failed"; } }
-  try{ const url=URL.createObjectURL(blob), a=h("a",{href:url,download:filename}); document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),4000); return "started"; }catch(e){ return "failed"; }
+  if(dl){ try{ await dl.save({filename,data:blob}); return "saved"; }catch(e){ return (e&&e.code)==="declined"?"declined":"manual"; } }
+  if(IS_IOS||RISKY){ const r=await shareBlob(blob,filename); if(r) return r; }
+  if(RISKY) return "manual";
+  return anchorSave(blob,filename);
 }
+/* 인증서를 크게 띄워 길게 눌러 저장하거나 캡처하게 한다 */
+function openSaver(dataUrl, blob, filename){
+  const note=h("p",{class:"q-sub",role:"status"});
+  const esc=e=>{ if(e.key==="Escape") close(); };
+  const close=()=>{ ov.remove(); document.removeEventListener("keydown",esc); };
+  const ov=h("div",{class:"overlay saver",role:"dialog","aria-modal":"true","aria-label":"인증서 직접 저장하기",onclick:e=>{ if(e.target===ov) close(); }},
+    h("section",{class:"card"},
+      h("h2",null,"인증서 직접 저장하기"),
+      h("img",{class:"cert-img",src:dataUrl,alt:"인증서"}),
+      h("ol",{class:"steps"},
+        h("li",null,h("div",null,h("b",null,"인증서 그림을 길게 누릅니다."))),
+        h("li",null,h("div",null,h("b",null,"‘이미지 저장’이나 ‘사진 앱에 저장’을 누릅니다."),h("br"),"기기에 따라 ‘이미지 다운로드’라고 나옵니다.")),
+        h("li",null,h("div",null,h("b",null,"메뉴가 뜨지 않으면 화면을 캡처합니다."),h("br"),"캡처한 그림을 패들렛에 올려도 됩니다."))),
+      note,
+      h("div",{class:"row"},h("button",{class:"btn",type:"button",onclick:()=>close()},"닫기"),
+        blob&&asShareFile(blob,filename)?h("button",{class:"btn ghost",type:"button",onclick:async()=>{ const r=await shareBlob(blob,filename); note.textContent=r==="shared"?"공유 창에서 ‘이미지 저장’을 누르면 사진첩에 들어갑니다.":r?"":"공유 창을 열지 못했습니다. 위 방법으로 저장하세요."; }},"공유 창 열기"):null,
+        blob?h("button",{class:"btn ghost",type:"button",onclick:()=>{ anchorSave(blob,filename); note.textContent="파일 내려받기를 시도했습니다. ‘지원하지 않는 파일 형식’이라고 나오면 위 방법으로 저장하세요."; }},"파일로 내려받기"):null)));
+  ov._close=close; document.addEventListener("keydown",esc); document.body.append(ov);
+}
+const SAVE_MSG={saved:"저장을 시작했습니다. 사진첩이나 ‘다운로드’ 폴더를 확인하세요. 안 보이면 ‘직접 저장하기’를 누르세요.",started:"저장을 시작했습니다. 사진첩이나 ‘다운로드’ 폴더를 확인하세요. 안 보이면 ‘직접 저장하기’를 누르세요.",
+  shared:"공유 창에서 ‘이미지 저장’을 누르면 사진첩에 들어갑니다. 패들렛 앱으로 바로 보내도 됩니다.",declined:"저장을 취소했습니다. 다시 누르면 저장할 수 있습니다.",
+  manual:"이 화면에서는 파일 저장이 막혀 있어, 직접 저장하는 방법을 띄웠습니다."};
+function inAppNotice(what){ if(IN_CLAUDE||!IN_APP) return null;
+  const href=!HOSTED?null:/KAKAOTALK/i.test(UA)?"kakaotalk://web/openExternal?url="+encodeURIComponent(location.href):IS_ANDROID?`intent://${location.host}${location.pathname}${location.search}#Intent;scheme=${location.protocol.replace(":","")};package=com.android.chrome;end`:null;
+  return h("div",{class:"inapp",role:"note"},h("b",null,"앱 안 화면으로 열렸습니다"),
+    h("p",null,`카카오톡 같은 앱 안의 화면에서는 ${what} 저장이 막혀 있습니다. 크롬, 사파리, 삼성 인터넷에서 열고 시작하세요. 기록은 브라우저마다 따로 남으므로, 시작하기 전에 옮겨야 합니다.`),
+    href?h("div",{class:"row"},h("a",{class:"btn ghost",href},"다른 브라우저로 열기")):null,
+    h("p",{class:"q-sub"},(href?"단추가 듣지 않으면 ":"")+"화면 구석의 메뉴(⋮ 또는 공유 단추)에서 ‘다른 브라우저로 열기’를 누르세요.")); }
 function viewCert(){
   if(!allClear()) return viewHome();
   const holder=h("div",null,h("p",{class:"q-sub"},"인증서를 만드는 중입니다…")), msg=h("p",{class:"q-sub",role:"status"});
   let blob=null; const name=`interview_cert_${String(S.p.id).replace(/[^A-Za-z0-9_-]+/g,"")||"me"}.png`; /* 한글 파일명은 일부 환경에서 이름이 사라져 영문·숫자만 쓴다 */
+  let dataUrl="";
   const saveBtn=h("button",{class:"btn",type:"button",disabled:true,onclick:async()=>{ if(!blob) return; const r=await saveBlob(blob,name);
-    msg.textContent=r==="saved"||r==="started"?"저장을 시작했습니다. 내려받은 파일을 확인하세요. 안 보이면 위 인증서 그림을 길게 눌러 저장하거나 화면을 캡처하세요.":r==="declined"?"저장을 취소했습니다. 다시 누르면 저장할 수 있습니다.":"이 화면에서는 바로 저장이 안 됩니다. 위 인증서 그림을 길게 눌러 저장하거나 화면을 캡처하세요."; }},"인증서 저장하기");
-  drawCert().then(c=>{ const img=new Image(); img.className="cert-img"; img.alt=`${S.p.id} ${S.p.name} 인증서`; img.src=c.toDataURL("image/png"); holder.replaceChildren(img); c.toBlob(b=>{ blob=b; saveBtn.disabled=!b; },"image/png"); }).catch(()=>{ holder.replaceChildren(h("p",{class:"err"},"인증서를 만들지 못했습니다. 노선도로 돌아갔다가 다시 들어와 보세요.")); });
+    msg.textContent=SAVE_MSG[r]||SAVE_MSG.manual; if(r==="manual") openSaver(dataUrl,blob,name); }},"인증서 저장하기");
+  const selfBtn=h("button",{class:"btn ghost",type:"button",disabled:true,onclick:()=>openSaver(dataUrl,blob,name)},"직접 저장하기");
+  drawCert().then(c=>{ const img=new Image(); img.className="cert-img"; img.alt=`${S.p.id} ${S.p.name} 인증서`; dataUrl=c.toDataURL("image/png"); img.src=dataUrl; holder.replaceChildren(img); selfBtn.disabled=false; c.toBlob(b=>{ blob=b; saveBtn.disabled=!b; },"image/png"); }).catch(()=>{ holder.replaceChildren(h("p",{class:"err"},"인증서를 만들지 못했습니다. 노선도로 돌아갔다가 다시 들어와 보세요.")); });
   const chk=h("input",{type:"checkbox",id:"padlet-done",checked:S.done,onchange:()=>{ fin.disabled=!chk.checked; }});
   const fin=h("button",{class:"btn",type:"button",disabled:!S.done,onclick:()=>{ S.done=true; persist(); sfx.clear(); confetti(90); show(viewEnd); }},"튜토리얼 마치기");
   if(!S.done){ sfx.clear(); confetti(60); }
@@ -1152,7 +1206,7 @@ function viewCert(){
     holder,
     h("h3",{class:"sec"},"마지막 미션: 패들렛에 인증서 올리기"),
     h("ol",{class:"steps"},
-      h("li",null,h("div",{class:"col"},h("b",null,"인증서를 저장합니다."),h("div",{class:"row"},saveBtn),msg)),
+      h("li",null,h("div",{class:"col"},h("b",null,"인증서를 저장합니다."),h("div",{class:"row"},saveBtn,selfBtn),h("span",{class:"q-sub"},"저장이 안 되면 ‘직접 저장하기’를 눌러 그림을 길게 누르거나 화면을 캡처하세요. 캡처한 그림을 올려도 됩니다."),msg)),
       h("li",null,h("div",{class:"col"},h("b",null,"패들렛을 엽니다."),PADLET_URL?h("div",{class:"row"},h("a",{class:"btn ghost",href:PADLET_URL,target:"_blank",rel:"noopener"},"패들렛 열기")):h("span",null,"선생님이 알려 준 패들렛 주소로 들어갑니다."))),
       h("li",null,h("div",{class:"col"},h("b",null,"저장한 인증서 그림을 내 이름으로 올립니다."),h("label",{class:"check",for:"padlet-done"},chk,"패들렛에 올렸습니다")))),
     h("div",{class:"row"},fin,h("button",{class:"link",type:"button",onclick:()=>show(viewHome)},"노선도로")),
